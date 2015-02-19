@@ -66,7 +66,7 @@ done
 ###########################################################################################################
 # check git.dave.eu connectivity
 
-ssh -o PasswordAuthentication=no git@${GIT_SERVER} > /dev/null 2>&1
+ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no git@${GIT_SERVER} > /dev/null 2>&1
 if [ ! "$?" -eq "0" ]
 then
 	debecho "connection to ${GIT_SERVER} failed. Please read docs to activate your account"
