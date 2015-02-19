@@ -1,0 +1,3 @@
+BORA Xpress is the new top-class Dual Cortex-A9 + FPGA CPU module by DAVE Embedded Systems, based on the recent Xilinx Zynq XC7Z015/XC7Z030 application processor. Thanks to BORA Xpress, customers are going to save time and resources by using a compact solution that includes both a CPU and an FPGA, avoiding complexities on the carrier PCB.
+BORA Xpress offers great computational power, thanks to the rich set of peripherals, the Dual Cortex-A9 and the Artix-7 FPGA together with a large set of high-speed I/Os (up to 6.25 Gbps).
+BORA Xpress is designed and manufactured according to DAVE Embedded Systems ULTRA Line specifications, in order to guarantee premium quality and technical value for customers who require top performances and flexibility.

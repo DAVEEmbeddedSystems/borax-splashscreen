@@ -1,0 +1,5 @@
+#!/bin/bash
+
+firefox http://wiki.dave.eu/index.php/Category:Bora
+
+exit 0

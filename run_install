@@ -1,0 +1,238 @@
+#!/bin/bash
+
+WGET=wget
+REPO=repo
+
+#######################################################################################################################
+# Library check
+
+function message_fail_libsh()
+{
+	    local ZENITY_INSTALLED
+        ZENITY_INSTALLED=`dpkg-query -l | grep zenity-common |& awk -F" " '{ print $1 }'`
+
+	    if [ "${ZENITY_INSTALLED}" != "ii" ]
+	    then
+		    echo "Impossible to connect to internet. Please, double check your Internet connection"
+	    else
+		    zenity --error --text "Impossible to connect to internet. Please, double check your Internet connection"
+	    fi
+}
+if [ ! -d libsh ]
+then
+	git clone https://github.com/architech-boards/libsh.git
+	[ $? -eq 0 ] || { message_fail_libsh; exit 1; }
+fi
+cd libsh
+git pull
+[ $? -eq 0 ] || { message_fail_libsh; exit 1; }
+source lib.sh
+cd ..
+
+#######################################################################################################################
+# Check maintenance
+
+#TODO: what is this?
+#check_maintenance
+
+###########################################################################################################
+# Parameters
+
+YOCTO_DIRECTORY="yocto"
+TOOLCHAIN_DIRECTORY="toolchain"
+cd ..
+ROOT_DIRECTORY=`pwd`
+BASEROOT_SDK=${ROOT_DIRECTORY}
+NR_CPUS=`grep -c ^processor /proc/cpuinfo`
+DEFAULT_MACHINE="bora"
+WGET_TIMEOUT=60
+GIT_SERVER=git.dave.eu
+URL_DOWNLOAD=$(get_url_download)
+
+###########################################################################################################
+# cleanup
+
+# TODO: for sake of simplicity we dont check for newer releases but just install the latest one
+# before downloading/installing just cleanup everything
+
+CLEANUP_DIRECTORY="eclipse java qtcreator sysroot toolchain workspace yocto"
+for DIR in ${CLEANUP_DIRECTORY}
+do
+	debecho "deleting directory $DIR"
+	rm -rf $DIR
+done
+
+
+###########################################################################################################
+# check git.dave.eu connectivity
+
+ssh -o PasswordAuthentication=no git@${GIT_SERVER} > /dev/null 2>&1
+if [ ! "$?" -eq "0" ]
+then
+	debecho "connection to ${GIT_SERVER} failed. Please read docs to activate your account"
+	internet_error
+fi
+
+
+###########################################################################################################
+# Yocto installation
+
+cd ${ROOT_DIRECTORY}
+mkdir -p ${YOCTO_DIRECTORY}
+cd ${YOCTO_DIRECTORY}
+if [ ! -d .repo ]
+then
+	${REPO} init -u git@${GIT_SERVER}:dave/bora/bora-bsp.git -b bora #> /dev/null 2>&1
+    [ $? -eq 0 ] || { rm -rf .repo; internet_error; }
+fi
+${REPO} sync #> /dev/null 2>&1
+source bora-bsp-init-env.sh build
+
+###########################################################################################################
+# Installing cross-toolchain
+TOOLCHAIN_ARCHIVE=belk-2.1.0_poky-eglibc-i686-meta-toolchain-armv7a-vfp-neon-toolchain-1.6.1.sh
+
+cd ${ROOT_DIRECTORY}
+
+cd ${ROOT_DIRECTORY}
+rm -rf temp
+mkdir -p temp
+cd temp
+${WGET} --timeout=${WGET_TIMEOUT} http://${GIT_SERVER}/belk/${TOOLCHAIN_ARCHIVE}  --user architech --password architech
+[ $? -eq 0 ] || { cd ..; rm -rf temp; internet_error; }
+
+
+debecho "installing toolchain into ${ROOT_DIRECTORY}/${TOOLCHAIN_DIRECTORY}"
+sh ./${TOOLCHAIN_ARCHIVE} -y -d ${ROOT_DIRECTORY}/${TOOLCHAIN_DIRECTORY}
+cd ..
+cd ${TOOLCHAIN_DIRECTORY}
+ln -s environment-setup* environment
+cd ..
+rm -rf temp/
+
+###########################################################################################################
+# Installing sdk enviroment
+
+#TODO: backup HERE?
+cd $ROOT_DIRECTORY
+
+killall eclipse 2>/dev/null
+killall qtcreator 2>/dev/null
+
+#TODO: use microzed SDK as reference
+#TODO: get versions
+LOCAL_VERSION=1
+
+mkdir -f conf
+rm -f conf/sdk.txt
+wget --timeout=${WGET_TIMEOUT} -P conf ${URL_DOWNLOAD}/microzed/sdk/dora/${LOCAL_VERSION}/sdk.txt
+[ $? -eq 0 ] || { rm conf/sdk.txt; internet_error; }
+sed -i "s|#URL_DOWNLOAD#|${URL_DOWNLOAD}|g" conf/sdk.txt
+
+if [ ! -f conf/sdk.txt ]
+then
+	debecho "cannot find conf/sdk.conf. Aborting installation"
+	abort_process
+fi
+while read LINE; do
+
+	CMD=`echo "${LINE}" | awk -F"@" '{print $1}'`
+
+	case  $CMD  in
+				# install or upgrade java runtime
+				"java")
+					echo "JAVA"
+					URL=`echo $LINE | awk -F"@" '{print $2}'`
+					FILE=`echo $LINE | awk -F"@" '{print $3}'`
+					VERSION=`echo $LINE | awk -F"@" '{print $4}'`
+
+					if [ ! -d java/$VERSION ]
+					then
+						#do_backup "java"
+						rm -rf java
+						${WGET} --timeout=${WGET_TIMEOUT} ${URL}
+						[ $? -eq 0 ] || { rm -f $FILE; internet_error; }
+						mkdir java
+						tar -zxf $FILE -C java
+						[ $? -eq 0 ] || { rm -f $FILE; rm -rf java; internet_error; }
+						rm -f $FILE
+						mv java/$VERSION/* java/
+					fi
+					;;
+				# install
+				"eclipse")
+					echo Install $CMD
+					URL=`echo $LINE | awk -F"@" '{print $2}'`
+					FILE=`echo $LINE | awk -F"@" '{print $3}'`
+					#do_backup "eclipse"
+					rm -rf eclipse
+					${WGET} --timeout=${WGET_TIMEOUT} ${URL}
+					[ $? -eq 0 ] || { rm -f $FILE; internet_error; }
+					tar -zxf $FILE
+					[ $? -eq 0 ] || { rm -f $FILE; internet_error; }
+					rm -f $FILE
+					;;
+				"qt-conf")
+				# configure yocto plugin
+					echo "QT CONF"
+					URL=`echo $LINE | awk -F"@" '{print $2}'`
+					FILE=`echo $LINE | awk -F"@" '{print $3}'`
+					do_backup "qtcreator/conf"
+					rm -f qtcreator/conf
+					${WGET} --timeout=${WGET_TIMEOUT} $URL
+					[ $? -eq 0 ] || { undo_backup "qtcreator/conf"; rm conf/sdk.txt; internet_error; }
+					tar -zxf $FILE -C qtcreator/
+					find qtcreator/ -type f -exec sed -i "s|@BASEROOT_SDK@|${BASEROOT_SDK}|g" '{}' \;
+					rm -f $FILE
+					mkdir -p ${ROOT_DIRECTORY}/workspace/qt
+					;;
+				"plugin")
+				# install or upgrade plugin of eclipse
+					echo "PLUGIN"
+					REPOSITORY=`echo $LINE | awk -F"@" '{print $2}'`
+					PLUGIN=`echo $LINE | awk -F"@" '{print $3}'`
+					VERSION=`echo $LINE | awk -F"@" '{print $4}'`
+					./eclipse/eclipse -vm java/bin -application org.eclipse.equinox.p2.director -noSplash -repository $REPOSITORY -installIUs $PLUGIN/$VERSION
+					[ $? -eq 0 ] || { rm conf/sdk.txt; internet_error; }
+					;;
+				"conf")
+				# configure yocto plugin
+					echo "CONF"
+					PATH_CONF=`echo $LINE | awk -F"@" '{print $2}'`
+					FILE=`echo $LINE | awk -F"@" '{print $3}'`
+					${WGET} --timeout=${WGET_TIMEOUT} ${URL_DOWNLOAD}/microzed/sdk/dora/${LOCAL_VERSION}/$FILE
+					[ $? -eq 0 ] || { rm conf/sdk.txt; internet_error; }
+					sed -i "s|@BASEROOT_SDK@|${BASEROOT_SDK}|g" $FILE
+					mkdir -p $PATH_CONF > /dev/null 2>&1
+					mv $FILE $PATH_CONF
+					;;
+				"build_workspace")
+				# build or rebuild the workspace
+					./eclipse/eclipse -vm java/bin -nosplash -application org.eclipse.jdt.apt.core.aptBuild -data ${ROOT_DIRECTORY}/workspace/eclipse
+					mkdir -p ${ROOT_DIRECTORY}/workspace/qt
+					;;
+				"cmd")
+				# execute a shell command from the script
+					echo "CMD"
+					EXECMD=`echo "${LINE}" | awk -F"@" '{print $2}'`
+					${EXECMD}
+					;;
+				*)
+					echo "IGNORED: ${LINE}"
+		  esac
+done < conf/sdk.txt
+
+###########################################################################################################
+# Script post-install
+
+: <<'COMMENT'
+cd $BASEROOT_SDK
+${WGET} --timeout=${WGET_TIMEOUT} ${URL_DOWNLOAD}/microzed/script/dora/post-script.sh
+[ $? -eq 0 ] || { internet_error; }
+chmod 777 post-script.sh
+./post-script.sh
+rm post-script.sh
+COMMENT
+
+
+exit 0

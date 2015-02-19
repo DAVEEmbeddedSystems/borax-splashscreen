@@ -1,0 +1,3 @@
+#!/bin/bash
+zenity --error --text="No QT for Bora yet"
+exit 0
